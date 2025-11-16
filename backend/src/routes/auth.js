@@ -31,7 +31,6 @@ router.post("/signup", (req, res) => {
     return res.status(400).json({ error: "email, password, full_name are required" });
   }
 
-  // 1) check if user already exists
   db.get("SELECT * FROM users WHERE email = ?", [email], (err, existingUser) => {
     if (err) {
       console.error("Error checking user:", err);
@@ -42,10 +41,8 @@ router.post("/signup", (req, res) => {
       return res.status(409).json({ error: "Email already in use" });
     }
 
-    // 2) hash password
     const password_hash = bcrypt.hashSync(password, 10);
 
-    // 3) insert user
     const sql = `
       INSERT INTO users (email, password_hash, full_name)
       VALUES (?, ?, ?)
@@ -56,17 +53,31 @@ router.post("/signup", (req, res) => {
         return res.status(500).json({ error: "Internal server error" });
       }
 
-      const newUser = {
-        id: this.lastID,
-        email,
-        full_name
-      };
+      const userId = this.lastID;
 
-      const token = createToken(newUser);
+      // Create default forest for this user
+      const forestSql = `
+        INSERT INTO forests (user_id, name, is_default)
+        VALUES (?, ?, 1)
+      `;
+      db.run(forestSql, [userId, "Untitled forest"], function (forestErr) {
+        if (forestErr) {
+          console.error("Error creating default forest:", forestErr);
+          // Not fatal for signup; proceed anyway
+        }
 
-      return res.status(201).json({
-        user: newUser,
-        token
+        const newUser = {
+          id: userId,
+          email,
+          full_name
+        };
+
+        const token = createToken(newUser);
+
+        return res.status(201).json({
+          user: newUser,
+          token
+        });
       });
     });
   });
@@ -111,7 +122,6 @@ router.post("/login", (req, res) => {
 
 // GET /api/auth/me  (protected)
 router.get("/me", authRequired, (req, res) => {
-  // req.user is set by authRequired
   res.json({
     user: req.user
   });

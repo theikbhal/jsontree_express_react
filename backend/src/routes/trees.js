@@ -73,7 +73,13 @@ router.post("/", requireApiKey, (req, res) => {
               return res.status(500).json({ error: "Internal server error" });
             }
 
-            // 4) respond with basic tree info
+            let parsedJson = null;
+            try {
+              parsedJson = JSON.parse(jsonString);
+            } catch (e) {
+              parsedJson = jsonString;
+            }
+
             return res.status(201).json({
               id: treeId,
               name: treeName,
@@ -82,7 +88,7 @@ router.post("/", requireApiKey, (req, res) => {
               forest_id: forestIdValue,
               current_version: {
                 version,
-                json_data: JSON.parse(jsonString)
+                json_data: parsedJson
               }
             });
           });
@@ -120,6 +126,400 @@ router.get("/", requireApiKey, (req, res) => {
     }));
 
     res.json(trees);
+  });
+});
+
+// GET /api/trees/:id  (get single tree with latest version)
+router.get("/:id", requireApiKey, (req, res) => {
+  const userId = req.apiUser.id;
+  const { id } = req.params;
+
+  const sql = `
+    SELECT
+      t.id,
+      t.name,
+      t.user_id,
+      t.forest_id,
+      t.is_public,
+      t.created_at,
+      t.updated_at,
+      tv.version AS current_version,
+      tv.json_data AS current_json_data,
+      tv.created_at AS current_version_created_at
+    FROM trees t
+    LEFT JOIN tree_versions tv ON tv.id = t.current_version_id
+    WHERE t.id = ? AND t.user_id = ?
+  `;
+
+  db.get(sql, [id, userId], (err, row) => {
+    if (err) {
+      console.error("Error fetching tree:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    if (!row) {
+      return res.status(404).json({ error: "Tree not found" });
+    }
+
+    let parsedJson = null;
+    if (row.current_json_data != null) {
+      try {
+        parsedJson = JSON.parse(row.current_json_data);
+      } catch (e) {
+        parsedJson = row.current_json_data;
+      }
+    }
+
+    res.json({
+      id: row.id,
+      name: row.name,
+      is_public: !!row.is_public,
+      user_id: row.user_id,
+      forest_id: row.forest_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      current_version: row.current_version,
+      current_version_created_at: row.current_version_created_at,
+      json_data: parsedJson
+    });
+  });
+});
+
+// GET /api/trees/:id/versions  (list versions for a tree)
+router.get("/:id/versions", requireApiKey, (req, res) => {
+  const userId = req.apiUser.id;
+  const { id } = req.params;
+
+  const sql = `
+    SELECT tv.version, tv.created_at
+    FROM tree_versions tv
+    JOIN trees t ON t.id = tv.tree_id
+    WHERE tv.tree_id = ? AND t.user_id = ?
+    ORDER BY tv.version ASC
+  `;
+
+  db.all(sql, [id, userId], (err, rows) => {
+    if (err) {
+      console.error("Error fetching tree versions:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "No versions found for this tree" });
+    }
+
+    res.json({
+      tree_id: id,
+      versions: rows
+    });
+  });
+});
+
+// GET /api/trees/:id/versions/:version  (get specific version)
+router.get("/:id/versions/:version", requireApiKey, (req, res) => {
+  const userId = req.apiUser.id;
+  const { id, version } = req.params;
+
+  const sql = `
+    SELECT tv.tree_id,
+           tv.version,
+           tv.json_data,
+           tv.created_at
+    FROM tree_versions tv
+    JOIN trees t ON t.id = tv.tree_id
+    WHERE tv.tree_id = ? AND tv.version = ? AND t.user_id = ?
+  `;
+
+  db.get(sql, [id, version, userId], (err, row) => {
+    if (err) {
+      console.error("Error fetching tree version:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    if (!row) {
+      return res.status(404).json({ error: "Version not found for this tree" });
+    }
+
+    let parsedJson = null;
+    if (row.json_data != null) {
+      try {
+        parsedJson = JSON.parse(row.json_data);
+      } catch (e) {
+        parsedJson = row.json_data;
+      }
+    }
+
+    res.json({
+      tree_id: row.tree_id,
+      version: row.version,
+      created_at: row.created_at,
+      json_data: parsedJson
+    });
+  });
+});
+
+// PATCH /api/trees/:id  (partial update: name, is_public, forest_id, json_data -> new version)
+router.patch("/:id", requireApiKey, (req, res) => {
+  const userId = req.apiUser.id;
+  const { id } = req.params;
+  const { name, is_public, forest_id, json_data } = req.body || {};
+
+  // 1) get existing tree to ensure ownership
+  const selectTreeSql = `
+    SELECT *
+    FROM trees
+    WHERE id = ? AND user_id = ?
+  `;
+
+  db.get(selectTreeSql, [id, userId], (err, treeRow) => {
+    if (err) {
+      console.error("Error fetching tree:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    if (!treeRow) {
+      return res.status(404).json({ error: "Tree not found" });
+    }
+
+    const newName =
+      typeof name !== "undefined" && name !== null && name.trim() !== ""
+        ? name.trim()
+        : treeRow.name;
+
+    const newIsPublic =
+      typeof is_public === "boolean"
+        ? (is_public ? 1 : 0)
+        : treeRow.is_public;
+
+    const newForestId =
+      typeof forest_id !== "undefined" ? (forest_id || null) : treeRow.forest_id;
+
+    // If json_data is provided, create a new version
+    if (typeof json_data !== "undefined") {
+      const maxVersionSql = `
+        SELECT MAX(version) AS max_version
+        FROM tree_versions
+        WHERE tree_id = ?
+      `;
+
+      db.get(maxVersionSql, [id], (verErr, verRow) => {
+        if (verErr) {
+          console.error("Error fetching max version:", verErr);
+          return res.status(500).json({ error: "Internal server error" });
+        }
+
+        const nextVersion = (verRow && verRow.max_version ? verRow.max_version : 0) + 1;
+        const jsonString =
+          typeof json_data === "string" ? json_data : JSON.stringify(json_data);
+
+        const insertVersionSql = `
+          INSERT INTO tree_versions (tree_id, version, json_data)
+          VALUES (?, ?, ?)
+        `;
+
+        db.run(
+          insertVersionSql,
+          [id, nextVersion, jsonString],
+          function (insertErr) {
+            if (insertErr) {
+              console.error("Error inserting new tree version:", insertErr);
+              return res.status(500).json({ error: "Internal server error" });
+            }
+
+            const newVersionId = this.lastID;
+
+            const updateTreeSql = `
+              UPDATE trees
+              SET name = ?,
+                  is_public = ?,
+                  forest_id = ?,
+                  current_version_id = ?,
+                  updated_at = datetime('now')
+              WHERE id = ? AND user_id = ?
+            `;
+
+            db.run(
+              updateTreeSql,
+              [newName, newIsPublic, newForestId, newVersionId, id, userId],
+              function (updateErr) {
+                if (updateErr) {
+                  console.error("Error updating tree:", updateErr);
+                  return res.status(500).json({ error: "Internal server error" });
+                }
+
+                // Fetch updated tree (reuse logic from GET /:id)
+                const finalSelectSql = `
+                  SELECT
+                    t.id,
+                    t.name,
+                    t.user_id,
+                    t.forest_id,
+                    t.is_public,
+                    t.created_at,
+                    t.updated_at,
+                    tv.version AS current_version,
+                    tv.json_data AS current_json_data,
+                    tv.created_at AS current_version_created_at
+                  FROM trees t
+                  LEFT JOIN tree_versions tv ON tv.id = t.current_version_id
+                  WHERE t.id = ? AND t.user_id = ?
+                `;
+
+                db.get(finalSelectSql, [id, userId], (finalErr, row) => {
+                  if (finalErr) {
+                    console.error("Error fetching updated tree:", finalErr);
+                    return res.status(500).json({ error: "Internal server error" });
+                  }
+
+                  let parsedJson = null;
+                  if (row.current_json_data != null) {
+                    try {
+                      parsedJson = JSON.parse(row.current_json_data);
+                    } catch (e) {
+                      parsedJson = row.current_json_data;
+                    }
+                  }
+
+                  res.json({
+                    id: row.id,
+                    name: row.name,
+                    is_public: !!row.is_public,
+                    user_id: row.user_id,
+                    forest_id: row.forest_id,
+                    created_at: row.created_at,
+                    updated_at: row.updated_at,
+                    current_version: row.current_version,
+                    current_version_created_at: row.current_version_created_at,
+                    json_data: parsedJson
+                  });
+                });
+              }
+            );
+          }
+        );
+      });
+    } else {
+      // No json_data change: just update metadata
+      const updateTreeSql = `
+        UPDATE trees
+        SET name = ?,
+            is_public = ?,
+            forest_id = ?,
+            updated_at = datetime('now')
+        WHERE id = ? AND user_id = ?
+      `;
+
+      db.run(
+        updateTreeSql,
+        [newName, newIsPublic, newForestId, id, userId],
+        function (updateErr) {
+          if (updateErr) {
+            console.error("Error updating tree:", updateErr);
+            return res.status(500).json({ error: "Internal server error" });
+          }
+
+          // Fetch updated tree
+          const finalSelectSql = `
+            SELECT
+              t.id,
+              t.name,
+              t.user_id,
+              t.forest_id,
+              t.is_public,
+              t.created_at,
+              t.updated_at,
+              tv.version AS current_version,
+              tv.json_data AS current_json_data,
+              tv.created_at AS current_version_created_at
+            FROM trees t
+            LEFT JOIN tree_versions tv ON tv.id = t.current_version_id
+            WHERE t.id = ? AND t.user_id = ?
+          `;
+
+          db.get(finalSelectSql, [id, userId], (finalErr, row) => {
+            if (finalErr) {
+              console.error("Error fetching updated tree:", finalErr);
+              return res.status(500).json({ error: "Internal server error" });
+            }
+
+            let parsedJson = null;
+            if (row.current_json_data != null) {
+              try {
+                parsedJson = JSON.parse(row.current_json_data);
+              } catch (e) {
+                parsedJson = row.current_json_data;
+              }
+            }
+
+            res.json({
+              id: row.id,
+              name: row.name,
+              is_public: !!row.is_public,
+              user_id: row.user_id,
+              forest_id: row.forest_id,
+              created_at: row.created_at,
+              updated_at: row.updated_at,
+              current_version: row.current_version,
+              current_version_created_at: row.current_version_created_at,
+              json_data: parsedJson
+            });
+          });
+        }
+      );
+    }
+  });
+});
+
+// DELETE /api/trees/:id  (delete tree + its versions)
+router.delete("/:id", requireApiKey, (req, res) => {
+  const userId = req.apiUser.id;
+  const { id } = req.params;
+
+  // Ensure the tree belongs to this user
+  const selectTreeSql = `
+    SELECT * FROM trees
+    WHERE id = ? AND user_id = ?
+  `;
+
+  db.get(selectTreeSql, [id, userId], (err, treeRow) => {
+    if (err) {
+      console.error("Error fetching tree:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    if (!treeRow) {
+      return res.status(404).json({ error: "Tree not found" });
+    }
+
+    db.serialize(() => {
+      const deleteVersionsSql = `
+        DELETE FROM tree_versions
+        WHERE tree_id = ?
+      `;
+      db.run(deleteVersionsSql, [id], function (verErr) {
+        if (verErr) {
+          console.error("Error deleting tree versions:", verErr);
+          return res.status(500).json({ error: "Internal server error" });
+        }
+
+        const deleteTreeSql = `
+          DELETE FROM trees
+          WHERE id = ? AND user_id = ?
+        `;
+        db.run(deleteTreeSql, [id, userId], function (delErr) {
+          if (delErr) {
+            console.error("Error deleting tree:", delErr);
+            return res.status(500).json({ error: "Internal server error" });
+          }
+
+          if (this.changes === 0) {
+            return res.status(404).json({ error: "Tree not found" });
+          }
+
+          return res.json({ success: true });
+        });
+      });
+    });
   });
 });
 

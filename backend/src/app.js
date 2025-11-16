@@ -9,8 +9,8 @@ const db = require("../db");
 const authRoutes = require("./routes/auth");
 const apiKeyRoutes = require("./routes/apiKeys");
 const treeRoutes = require("./routes/trees");
-
-
+const forestRoutes = require("./routes/forests"); 
+const publicTreeRoutes = require("./routes/publicTrees"); // 👈 NEW
 const app = express();
 
 // Middleware
@@ -36,6 +36,12 @@ app.use("/api/auth", authRoutes);
 app.use("/api/api-keys", apiKeyRoutes);
 
 // Tree routes (X-API-Key auth)
-app.use("/api/trees", treeRoutes); // 👈 IMPORTANT
+app.use("/api/trees", treeRoutes); 
+
+// Forest routes (X-API-Key auth)
+app.use("/api/forests", forestRoutes);
+
+// Public tree routes (no auth, only is_public=1)
+app.use("/api/public", publicTreeRoutes);
 
 module.exports = app;
