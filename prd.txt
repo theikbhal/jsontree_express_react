@@ -1,0 +1,167 @@
+
+https://chatgpt.com/c/6919ad55-ed88-8321-8abd-3c1b024b8616
+
+Here’s a first version of the DB tables + API docs for your jsontree (jsonbin.io-inspired) clone with Express + SQLite and React frontend.
+
+1. Core Concepts
+
+User
+
+Signs up with email, password, full name.
+
+Can own many trees and forests.
+
+Can have many API keys.
+
+Tree
+
+Main JSON document unit.
+
+Fields: id, name, json data, public/private.
+
+Belongs to a user, optionally to a forest.
+
+Has multiple versions.
+
+Tree Version
+
+Snapshot of a tree at a given time.
+
+Forest
+
+Logical grouping of trees.
+
+A user can have many forests.
+
+Trees can belong to zero or one forest.
+
+Default “Untitled forest” or null forest_id as implicit bucket.
+
+API Key
+
+Belongs to a user.
+
+Required for write operations + private reads.
+
+Public trees can be read without API key.
+
+Auth:
+
+UI can use email + password session/JWT.
+
+API calls use X-API-Key header from API keys created by the user.
+
+2. Database Schema (SQLite)
+2.1 users
+CREATE TABLE users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  email         TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  full_name     TEXT NOT NULL,
+  created_at    DATETIME NOT NULL DEFAULT (datetime('now')),
+  updated_at    DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+2.2 api_keys
+CREATE TABLE api_keys (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id        INTEGER NOT NULL,
+  key_hash       TEXT NOT NULL UNIQUE,     -- store hash, not raw key
+  label          TEXT,                     -- e.g. "Main laptop", "Server"
+  last_four      TEXT,                     -- last 4 chars of raw key (for UI)
+  created_at     DATETIME NOT NULL DEFAULT (datetime('now')),
+  revoked_at     DATETIME,                 -- null = active
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX idx_api_keys_user_id ON api_keys(user_id);
+
+2.3 forests
+CREATE TABLE forests (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL,
+  name       TEXT NOT NULL,   -- e.g. 'Untitled forest'
+  is_default INTEGER NOT NULL DEFAULT 0,  -- 0/1
+  created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+  updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX idx_forests_user_id ON forests(user_id);
+
+2.4 trees
+
+Logical tree, links to owner + forest and points to current version.
+
+CREATE TABLE trees (
+  id                 TEXT PRIMARY KEY,   -- could be shortid/uuid generated in app
+  user_id            INTEGER NOT NULL,
+  forest_id          INTEGER,            -- nullable: means "no forest/implicit"
+  name               TEXT NOT NULL DEFAULT 'Untitled tree',
+  is_public          INTEGER NOT NULL DEFAULT 0,  -- 0 = private, 1 = public
+  current_version_id INTEGER,            -- FK to tree_versions.id
+  created_at         DATETIME NOT NULL DEFAULT (datetime('now')),
+  updated_at         DATETIME NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (forest_id) REFERENCES forests(id)
+);
+
+CREATE INDEX idx_trees_user_id ON trees(user_id);
+CREATE INDEX idx_trees_forest_id ON trees(forest_id);
+CREATE INDEX idx_trees_is_public ON trees(is_public);
+
+2.5 tree_versions
+
+Each insert here is a new version of a tree.
+
+CREATE TABLE tree_versions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  tree_id       TEXT NOT NULL,
+  version       INTEGER NOT NULL,      -- 1, 2, 3...
+  json_data     TEXT NOT NULL,         -- JSON string
+  created_at    DATETIME NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (tree_id) REFERENCES trees(id),
+  UNIQUE (tree_id, version)
+);
+
+CREATE INDEX idx_tree_versions_tree_id ON tree_versions(tree_id);
+
+
+When you create a new tree:
+
+Insert into trees (without current_version_id).
+
+Insert version 1 into tree_versions.
+
+Update trees.current_version_id with the created version ID.
+
+3. Auth & Security Model
+3.1 Authentication
+
+Signup/Login: via email + password.
+
+Store password_hash (bcrypt or similar), never plain password.
+
+On login:
+
+Return a JWT or session cookie for web UI.
+
+API that uses API keys can be independent of login after setup.
+
+3.2 API Keys
+
+Caller sends: X-API-Key: <raw-key>.
+
+Backend:
+
+Hash <raw-key>, match against api_keys.key_hash where revoked_at IS NULL.
+
+Identify user_id from that key.
+
+Access rules:
+
+Create/update/delete trees & forests: require valid API key (owner).
+
+Read private tree: require valid API key for the owner.
+
+Read public tree: no API key needed.

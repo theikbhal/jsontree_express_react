@@ -1,0 +1,48 @@
+https://chatgpt.com/c/6919ad55-ed88-8321-8abd-3c1b024b8616
+
+jsonbin.io  clone -> inspire -> jsontree 
+backend express sqlite
+C:\workspace\jsonbin_workspace\jsonb_react_express\backend
+---
+Frontend react.js
+C:\workspace\jsonbin_workspace\jsonb_react_express\frontend
+---
+jsonbin.io 
+bin -> i will stay 
+bin , collection 
+tree, forest 
+---
+tree (id,  json data , public(true or false , default false), name (optiona, untitled default),)
+tree have multiple version 
+user can have multiple tree 
+one forest can have mutliple tree 
+=---
+tree 
+1) crate , edit, get tree by id, delete by id,get tree by id,  partial change (name change, public true or false,  data change) , get all tree by  user owned
+---
+forest
+--
+1) get all forest created by ownser(user)
+2) create forest by user
+3) update forest name 
+4) untitle forest name default for one user , whatever tree they created that will come under that or no forest id 
+---
+relationship
+1) user -> many tree, zero ormore
+2) user -> many forest , zero or more
+3) a forest can have more zero or more tree
+4) uesr can create api key , 
+5) user -> one or more api key 
+---
+Every api request need  need api key for  update or private read , unless public tree
+---
+user auth
+1) user signup  with  email, password, full name 
+2)user login with email, passwrod
+---
+later support for google login sso, other
+--
+lets write api docuemtn, table, 
+---
+cors support 
+---
