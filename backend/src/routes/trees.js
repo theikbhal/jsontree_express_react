@@ -99,17 +99,26 @@ router.post("/", requireApiKey, (req, res) => {
 });
 
 // GET /api/trees  (list all trees for API-key owner)
+// GET /api/trees  (list all trees for API-key owner, optional ?forest_id=)
 router.get("/", requireApiKey, (req, res) => {
   const userId = req.apiUser.id;
+  const { forest_id } = req.query;
 
-  const sql = `
+  let sql = `
     SELECT id, name, is_public, forest_id, current_version_id, created_at, updated_at
     FROM trees
     WHERE user_id = ?
-    ORDER BY created_at DESC
   `;
+  const params = [userId];
 
-  db.all(sql, [userId], (err, rows) => {
+  if (forest_id) {
+    sql += " AND forest_id = ?";
+    params.push(forest_id);
+  }
+
+  sql += " ORDER BY created_at DESC";
+
+  db.all(sql, params, (err, rows) => {
     if (err) {
       console.error("Error fetching trees:", err);
       return res.status(500).json({ error: "Internal server error" });
@@ -128,6 +137,7 @@ router.get("/", requireApiKey, (req, res) => {
     res.json(trees);
   });
 });
+
 
 // GET /api/trees/:id  (get single tree with latest version)
 router.get("/:id", requireApiKey, (req, res) => {
@@ -521,6 +531,119 @@ router.delete("/:id", requireApiKey, (req, res) => {
       });
     });
   });
+
+
+  // DELETE /api/trees/:id/versions/:version  (delete specific version)
+  router.delete("/:id/versions/:version", requireApiKey, (req, res) => {
+    const userId = req.apiUser.id;
+    const { id, version } = req.params;
+
+    // 1) Ensure tree belongs to user
+    const selectTreeSql = `
+    SELECT * FROM trees
+    WHERE id = ? AND user_id = ?
+  `;
+    db.get(selectTreeSql, [id, userId], (err, treeRow) => {
+      if (err) {
+        console.error("Error fetching tree:", err);
+        return res.status(500).json({ error: "Internal server error" });
+      }
+      if (!treeRow) {
+        return res.status(404).json({ error: "Tree not found" });
+      }
+
+      // 2) Count versions
+      const countSql = `
+      SELECT COUNT(*) AS cnt
+      FROM tree_versions
+      WHERE tree_id = ?
+    `;
+      db.get(countSql, [id], (cntErr, cntRow) => {
+        if (cntErr) {
+          console.error("Error counting versions:", cntErr);
+          return res.status(500).json({ error: "Internal server error" });
+        }
+
+        if (!cntRow || cntRow.cnt <= 1) {
+          return res.status(400).json({
+            error: "Cannot delete the last remaining version of a tree"
+          });
+        }
+
+        // 3) Get id of the version we want to delete
+        const selectVerSql = `
+        SELECT id
+        FROM tree_versions
+        WHERE tree_id = ? AND version = ?
+      `;
+        db.get(selectVerSql, [id, version], (selErr, verRow) => {
+          if (selErr) {
+            console.error("Error selecting version:", selErr);
+            return res.status(500).json({ error: "Internal server error" });
+          }
+          if (!verRow) {
+            return res.status(404).json({ error: "Version not found" });
+          }
+
+          const versionIdToDelete = verRow.id;
+          const isCurrent = treeRow.current_version_id === versionIdToDelete;
+
+          // 4) Delete that version
+          const deleteSql = `
+          DELETE FROM tree_versions
+          WHERE id = ?
+        `;
+          db.run(deleteSql, [versionIdToDelete], function (delErr) {
+            if (delErr) {
+              console.error("Error deleting version:", delErr);
+              return res.status(500).json({ error: "Internal server error" });
+            }
+
+            if (!isCurrent) {
+              return res.json({ success: true });
+            }
+
+            // 5) If it was current, set current_version_id to latest remaining version
+            const latestVerSql = `
+            SELECT id
+            FROM tree_versions
+            WHERE tree_id = ?
+            ORDER BY version DESC
+            LIMIT 1
+          `;
+            db.get(latestVerSql, [id], (latestErr, latestRow) => {
+              if (latestErr || !latestRow) {
+                console.error("Error selecting latest version:", latestErr);
+                return res.status(500).json({ error: "Internal server error" });
+              }
+
+              const updateTreeSql = `
+              UPDATE trees
+              SET current_version_id = ?, updated_at = datetime('now')
+              WHERE id = ? AND user_id = ?
+            `;
+              db.run(
+                updateTreeSql,
+                [latestRow.id, id, userId],
+                function (updateErr) {
+                  if (updateErr) {
+                    console.error("Error updating tree current_version:", updateErr);
+                    return res.status(500).json({ error: "Internal server error" });
+                  }
+
+                  return res.json({ success: true });
+                }
+              );
+            });
+          });
+        });
+      });
+    });
+  });
+
+  //end
+
+
 });
 
 module.exports = router;
