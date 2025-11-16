@@ -1,6 +1,8 @@
-import { useEffect,useState } from "react";
+import { useEffect, useState } from "react";
 import AuthPanel from "./components/AuthPanel.jsx";
 import ApiKeyPanel from "./components/ApiKeyPanel.jsx";
+import TreePanel from "./components/TreePanel.jsx";
+
 
 function App() {
   const [view, setView] = useState("welcome");
@@ -126,25 +128,10 @@ function App() {
 
             <ApiKeyPanel onSelectKey={handleKeySelect} />
 
-            {activeKeyLast4 && (
-              <div
-                style={{
-                  marginTop: "0.5rem",
-                  padding: "0.6rem 0.8rem",
-                  borderRadius: "0.75rem",
-                  border: "1px dashed #4b5563",
-                  fontSize: "0.8rem",
-                  color: "#9ca3af",
-                  maxWidth: "640px",
-                }}
-              >
-                Active API key last 4 digits: <b>{activeKeyLast4}</b>.
-                For calls that need <code>X-API-Key</code>, you will paste the full{" "}
-                <code>jt_...</code> key later into a tree editor panel.
-              </div>
-            )}
+            <TreePanel />
           </section>
         )}
+
       </main>
     </div>
   );
