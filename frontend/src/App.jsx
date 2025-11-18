@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import AuthPanel from "./components/AuthPanel.jsx";
 import ApiKeyPanel from "./components/ApiKeyPanel.jsx";
 import TreePanel from "./components/TreePanel.jsx";
+import ForestPanel from "./components/ForestPanel.jsx";
 
 
 function App() {
@@ -13,6 +14,9 @@ function App() {
   const [activeKeyLast4, setActiveKeyLast4] = useState(
     localStorage.getItem("jsontree_api_key_last4") || null
   );
+
+  const [selectedForestId, setSelectedForestId] = useState(null);
+
 
   function handleAuthSuccess(user, token) {
     setCurrentUser(user || null);
@@ -128,7 +132,14 @@ function App() {
 
             <ApiKeyPanel onSelectKey={handleKeySelect} />
 
-            <TreePanel />
+            {/* <ForestPanel onSelectForest={setSelectedForestId} />
+
+            <TreePanel /> */}
+
+            <ForestPanel onSelectForest={setSelectedForestId} />
+
+            <TreePanel selectedForestId={selectedForestId} />
+
           </section>
         )}
 

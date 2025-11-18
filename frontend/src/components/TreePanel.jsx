@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
-import { apiRequestWithKey } from "../apiClient.js";
+// import { apiRequestWithKey } from "../apiClient.js";
+import { apiRequest } from "../apiClient.js"; // uses JWT from login
 
-export default function TreePanel() {
+
+// export default function TreePanel() {
+export default function TreePanel({ selectedForestId }) {
+
   const [apiKeyInput, setApiKeyInput] = useState(
     localStorage.getItem("jsontree_api_key") || ""
   );
@@ -36,30 +40,68 @@ export default function TreePanel() {
     setSaveStatus(`Saved API key. Last 4 digits: ${last4}`);
   }
 
-  async function loadTrees() {
+  // async function loadTrees() {
+  //   setTreesLoading(true);
+  //   setTreesError(null);
+  //   try {
+  //     // const data = await apiRequestWithKey("/api/trees", { method: "GET" });
+  //     const data = await apiRequest("/api/trees", { method: "GET" });
+
+  //     setTrees(data || []);
+  //   } catch (err) {
+  //     console.error(err);
+  //     setTreesError(
+  //       err.data?.error ||
+  //       err.message ||
+  //       // "Failed to load trees. Check X-API-Key and backend."
+  //       "Failed to load trees. Check you are logged in and backend is running."
+
+  //     );
+  //   } finally {
+  //     setTreesLoading(false);
+  //   }
+  // }
+
+  async function loadTrees(forestId) {
     setTreesLoading(true);
     setTreesError(null);
     try {
-      const data = await apiRequestWithKey("/api/trees", { method: "GET" });
+      const query = forestId ? `?forest_id=${encodeURIComponent(forestId)}` : "";
+      const data = await apiRequest(`/api/trees${query}`, { method: "GET" });
       setTrees(data || []);
     } catch (err) {
-      console.error(err);
       setTreesError(
         err.data?.error ||
-          err.message ||
-          "Failed to load trees. Check X-API-Key and backend."
+        err.message ||
+        // "Failed to load trees. Check X-API-Key and backend."
+        "Failed to load trees. Check you are logged in and backend is running."
+
       );
     } finally {
       setTreesLoading(false);
     }
   }
 
+
+  // useEffect(() => {
+  //   // Auto-load if key already saved
+  //   if (localStorage.getItem("jsontree_api_key")) {
+  //     loadTrees().catch(() => {});
+  //   }
+  // }, []);
+
+  // useEffect(() => {
+  //   // Logged-in UI uses JWT, no API key needed
+  //   loadTrees().catch(() => { });
+  // }, []);
+
   useEffect(() => {
-    // Auto-load if key already saved
-    if (localStorage.getItem("jsontree_api_key")) {
-      loadTrees().catch(() => {});
-    }
-  }, []);
+    // Reload trees whenever forest changes
+    loadTrees(selectedForestId).catch(() => { });
+  }, [selectedForestId]);
+
+
+
 
   async function handleCreateTree(e) {
     e.preventDefault();
@@ -76,16 +118,31 @@ export default function TreePanel() {
     }
 
     try {
+      // const body = {
+      //   name: newName || "Untitled tree",
+      //   json_data: parsedJson,
+      //   is_public: newIsPublic,
+      // };
+
       const body = {
         name: newName || "Untitled tree",
         json_data: parsedJson,
         is_public: newIsPublic,
+        forest_id: selectedForestId ? Number(selectedForestId) : null,
       };
 
-      const created = await apiRequestWithKey("/api/trees", {
+
+      // const created = await apiRequestWithKey("/api/trees", {
+      //   method: "POST",
+      //   body: JSON.stringify(body),
+      // });
+
+
+      const created = await apiRequest("/api/trees", {
         method: "POST",
         body: JSON.stringify(body),
       });
+
 
       // Add to list
       setTrees((prev) => [created, ...prev]);
@@ -94,11 +151,18 @@ export default function TreePanel() {
       setSaveStatus("Tree created successfully.");
     } catch (err) {
       console.error(err);
+      // setCreateError(
+      //   err.data?.error ||
+      //   err.message ||
+      //   "Failed to create tree. Check X-API-Key and backend."
+      // );
+
       setCreateError(
         err.data?.error ||
-          err.message ||
-          "Failed to create tree. Check X-API-Key and backend."
+        err.message ||
+        "Failed to create tree. Check you are logged in and backend is running."
       );
+
     } finally {
       setCreateLoading(false);
     }
@@ -110,14 +174,16 @@ export default function TreePanel() {
     setSelectedTreeError(null);
 
     try {
-      const data = await apiRequestWithKey(`/api/trees/${id}`, { method: "GET" });
+      // const data = await apiRequestWithKey(`/api/trees/${id}`, { method: "GET" });
+      const data = await apiRequest(`/api/trees/${id}`, { method: "GET" });
+
       setSelectedTree(data);
     } catch (err) {
       console.error(err);
       setSelectedTreeError(
         err.data?.error ||
-          err.message ||
-          "Failed to load tree details. Check X-API-Key."
+        err.message ||
+        "Failed to load tree details. Check X-API-Key."
       );
     } finally {
       setSelectedTreeLoading(false);
@@ -150,8 +216,11 @@ export default function TreePanel() {
             fontSize: "0.85rem",
           }}
         >
-          Uses <code>X-API-Key</code> for{" "}
-          <code>GET /api/trees</code> and <code>POST /api/trees</code>.
+          {/* Uses <code>X-API-Key</code> for{" "}
+          <code>GET /api/trees</code> and <code>POST /api/trees</code>. */}
+
+          Uses your login (JWT) in the UI. External apps can still use <code>X-API-Key</code>.
+
         </p>
 
         {/* API key input */}
@@ -226,7 +295,8 @@ export default function TreePanel() {
           </span>
           <button
             type="button"
-            onClick={loadTrees}
+            // onClick={loadTrees}
+            onClick={() => loadTrees(selectedForestId)}
             disabled={treesLoading}
             style={{
               padding: "0.3rem 0.7rem",
@@ -512,7 +582,7 @@ export default function TreePanel() {
                 overflowX: "auto",
               }}
             >
-{JSON.stringify(selectedTree.json_data, null, 2)}
+              {JSON.stringify(selectedTree.json_data, null, 2)}
             </pre>
           </div>
         )}

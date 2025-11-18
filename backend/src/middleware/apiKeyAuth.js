@@ -1,6 +1,9 @@
 // src/middleware/apiKeyAuth.js
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const db = require("../../db");
+
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
 // Helper: find user from a raw API key
 function findUserByApiKey(rawKey, callback) {
@@ -51,31 +54,79 @@ function findUserByApiKey(rawKey, callback) {
   });
 }
 
-// Middleware: require a valid X-API-Key
+// Helper: find user from JWT token (for logged-in UI)
+function findUserFromJwt(token, callback) {
+  if (!token) {
+    return callback(null, null);
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err || !decoded || !decoded.id) {
+      return callback(null, null);
+    }
+
+    const sql = `
+      SELECT id, email, full_name
+      FROM users
+      WHERE id = ?
+    `;
+    db.get(sql, [decoded.id], (dbErr, user) => {
+      if (dbErr) {
+        console.error("Error fetching user from JWT:", dbErr);
+        return callback(dbErr);
+      }
+      if (!user) {
+        return callback(null, null);
+      }
+      callback(null, { user });
+    });
+  });
+}
+
+// Middleware: require a valid X-API-Key OR JWT Bearer token
 function requireApiKey(req, res, next) {
   const rawKey =
     req.headers["x-api-key"] ||
-    req.headers["X-API-Key"] || // just in case
+    req.headers["X-API-Key"] ||
     null;
 
-  if (!rawKey) {
-    return res.status(401).json({ error: "Missing X-API-Key header" });
+  if (rawKey) {
+    // Normal API-key flow
+    return findUserByApiKey(rawKey, (err, result) => {
+      if (err) {
+        return res.status(500).json({ error: "Internal server error" });
+      }
+
+      if (!result) {
+        return res.status(401).json({ error: "Invalid API key" });
+      }
+
+      req.apiUser = result.user;
+      req.apiKey = result.apiKey;
+      return next();
+    });
   }
 
-  findUserByApiKey(rawKey, (err, result) => {
+  // If no API key, try JWT from Authorization: Bearer <token>
+  const authHeader = req.headers["authorization"] || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length)
+    : null;
+
+  return findUserFromJwt(token, (err, result) => {
     if (err) {
       return res.status(500).json({ error: "Internal server error" });
     }
 
     if (!result) {
-      return res.status(401).json({ error: "Invalid API key" });
+      return res
+        .status(401)
+        .json({ error: "Missing X-API-Key header or Bearer token" });
     }
 
-    // Attach to request
     req.apiUser = result.user;
-    req.apiKey = result.apiKey;
-
-    next();
+    req.apiKey = null; // coming from JWT, not API key
+    return next();
   });
 }
 
