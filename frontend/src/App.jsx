@@ -42,7 +42,8 @@ function App() {
         }}
       >
         <div style={{ fontWeight: "bold", fontSize: "1.1rem" }}>
-          jsontree <span style={{ opacity: 0.7 }}>frontend</span>
+          jsontree 
+          {/* <span style={{ opacity: 0.7 }}>frontend</span> */}
         </div>
         <nav style={{ display: "flex", gap: "1rem", fontSize: "0.9rem" }}>
           <button
@@ -90,8 +91,9 @@ function App() {
               Welcome to jsontree 🌲
             </h1>
             <p style={{ maxWidth: "600px", lineHeight: 1.6, color: "#9ca3af" }}>
-              This frontend talks to your Express + SQLite backend at{" "}
-              <code>http://localhost:4000</code>. Start with the <b>Auth</b> tab to sign
+              {/* This frontend talks to your Express + SQLite backend at{" "}
+              <code>http://localhost:4000</code>.  */}
+              Start with the <b>Auth</b> tab to sign
               up or log in. Then go to <b>Dashboard</b> to create API keys, forests and
               manage trees.
             </p>
